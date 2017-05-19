@@ -195,7 +195,7 @@ describe('ObjectStream', function () {
                     done();
                 }, function (err) {
                     done(err);
-                })
+                });
             }, function (err) {
                 done(err);
             });
@@ -238,6 +238,25 @@ describe('UploadServer', function () {
                     }
                 });
             });
+        });
+    });
+
+    it('should send an error code if path is not present', function (done) {
+        var uploadServer = new common.UploadServer({
+            port: 8001
+        }, {
+            '/a': './common.js'
+        });
+        uploadServer.listen();
+        http.get({
+            port: 8001,
+            path: '/fake'
+        }, function (res) {
+            if (res.statusCode === 200) {
+                done(new Error("Sent nonexistent file"));
+            } else {
+                done();
+            }
         });
     });
 });

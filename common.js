@@ -42,8 +42,7 @@ function getConfigOpts(fp) {
                         reject(err);
                     }
                     try {
-                        decoder.write(data);
-                        jsonStr = decoder.end();
+                        jsonStr = decoder.write(data);
                         resolve(JSON.parse(jsonStr));
                     } catch (e) {
                         reject(e);
@@ -219,18 +218,17 @@ var ObjectStream = (function () {
  */
 function UploadServer(opts, files) {
     'use-strict';
-    var fp;
-    function checkExists() {
+    function checkExists(fp) {
         return function (exists) {
             if (exists === false) {
                 files[fp] = undefined;
             }
         };
     }
-    for (fp in files) {
-        files[fp] = path.resolve(files[fp]);
-        fs.exists(files[fp], checkExists());
-    }
+    Object.keys(files).forEach(function (val) {
+        files[val] = path.resolve(files[val]);
+        fs.exists(files[val], checkExists(val));
+    });
     var server = http.createServer(function (request, response) {
         var url, file, headerSet;
         if (request.url.indexOf("/") === 0) {
