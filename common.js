@@ -9,6 +9,9 @@ var fs = require('fs');
 var http = require('http');
 var StringDecoder = require('string_decoder').StringDecoder;
 
+
+var SERVER_DEFAULT_PORT = 9001;
+
 /**
  * @property {string} client.host The host of the remote server to connect to
  * @property {Integer} client.port The port on which the remote server is listening
@@ -18,9 +21,16 @@ var StringDecoder = require('string_decoder').StringDecoder;
 var defaultConfig = {
     'client': {
         'host': 'localhost',
-        'port': 9001,
-        'username': 'name',
-        'key': "secretkey"
+        'port': SERVER_DEFAULT_PORT,
+        'username': 'testuser',
+        'key': "secretkeydontsteal"
+    },
+    'server': {
+        'users': {
+            'testuser': 'secretkeydontsteal'
+        },
+        'username': 'serveruser',
+        'secretkey': 'otherkey'
     }
 };
 
@@ -276,8 +286,15 @@ function UploadServer(opts, files) {
     };
 }
 
+var commands = {
+    CLOSE: "CLOSE",
+    HANDSHAKE: "HANDSHAKE"
+};
+
 module.exports = {
     ObjectStream: ObjectStream,
     getConfigOpts: getConfigOpts,
-    UploadServer: UploadServer
+    UploadServer: UploadServer,
+    SERVER_DEFAULT_PORT: SERVER_DEFAULT_PORT,
+    commands: commands
 };

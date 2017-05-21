@@ -40,6 +40,10 @@ describe('ObjectStream', function () {
 
     osServer.listen(9001, 'localhost');
 
+    after(function () {
+        osServer.close();
+    });
+
     describe("#sendObject", function () {
         it('should reject if no object is given as an argument', function (done) {
             var clientOS = new common.ObjectStream({
