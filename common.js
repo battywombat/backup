@@ -30,7 +30,8 @@ var defaultConfig = {
             'testuser': 'secretkeydontsteal'
         },
         'username': 'serveruser',
-        'secretkey': 'otherkey'
+        'secretkey': 'otherkey',
+        dbPath: './db.sqlite3'
     }
 };
 

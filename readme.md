@@ -231,7 +231,7 @@ CREATE TABLE tracked_files (
 );
 
 CREATE TABLE stored_files (
-        id INT NOT NULL UNIQUE AUTO_INCREMENT,
+    id INT NOT NULL UNIQUE AUTO_INCREMENT,
 	file_id INT NOT NULL,
 	server_path VARCHAR(255) NOT NULL,
 	date_added DATETIME NOT NULL,

@@ -1,6 +1,7 @@
 var net = require('net');
 
 var chai = require('chai');
+var sqlite = require('sqlite3');
 
 var common = require('../common');
 var backupserver = require('../server');
@@ -59,4 +60,49 @@ describe('BackupServer', function () {
             });
         });
     });
+
+    describe("#initDB", function () {
+        var srv;
+        var db;
+        // beforeEach(function () {
+        // });
+
+        afterEach(function (done) {
+            srv.close().then(done);
+        });
+
+        function connectDB() {
+            return new Promise(function (resolve, reject) {
+                srv = new backupserver.BackupServer({dbPath: './fake'});
+                srv.listen(9002).then(function () {
+                    db = new sqlite.Database("./fake", function (err) {
+                        if (err) {
+                            reject(err);
+                        }
+                        resolve(db);
+                    });
+                });
+            });
+        }
+        function checkDB(db) {
+            return new Promise(function (resolve, reject) {
+                db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='users'", undefined, function (err, row) {
+                    if (err || row === undefined) {
+                        reject(err);
+                    }
+                    resolve();
+                });
+
+            });
+        }
+
+        it("Should create the database if it has not already been initalized", function (done) {
+            srv = backupserver.BackupServer({dbPath: "./fake"});
+            srv.listen().then(connectDB, done)
+                .then(checkDB, done)
+                .then(done, done);
+        });
+    });
+
+    
 });
