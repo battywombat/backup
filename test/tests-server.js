@@ -103,6 +103,4 @@ describe('BackupServer', function () {
                 .then(done, done);
         });
     });
-
-    
 });

@@ -11,7 +11,7 @@ CREATE TABLE users (
        password CHAR(50)
 );
 
-INSERT INTO users VALUES("admin", "beginners password");
+INSERT INTO users(hostname, password) VALUES("admin", "beginners password");
 
 CREATE TABLE tracked_files (
        id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,6 +29,15 @@ CREATE TABLE stored_files (
     FOREIGN KEY (file_id) REFERENCES tracked_files(id)
 );`;
 
+function promiseLoop(condition, promise) {
+    'use-strict';
+    return new Promise(function (resolve, reject) {
+        if (condition() !== true) {
+            resolve();
+        }
+        return promise().then(promiseLoop(condition, promise), reject);
+    });
+}
 
 function BackupServer(opts) {
     'use-strict';
@@ -48,23 +57,23 @@ function BackupServer(opts) {
             objStream.sendObject({
                 username: opts.username,
                 secretkey: opts.secretkey
-            }).then(function () {
-                resolve();
-            }, reject);
+            }).then(resolve, reject);
 
         });
     }
 
-    function handleCommand(objStream, handshaked) {
+    function handleCommand(objStream) {
         return new Promise(function (resolve, reject) {
             objStream.recieveObject().then(function (obj) {
                 if (obj.type === common.commands.HANDSHAKE) {
                     serverDoHandshake(obj).then(function () {
-                        handleCommand(objStream, true);
+                        objStream.handshaked = true;
+                        resolve();
                     }, reject);
                 } else if (obj.type === common.commands.CLOSE) {
+                    objStream.closed = true;
                     resolve();
-                } else if (handshaked === false && opts.allowSkippedHandshake === false) {
+                } else if (objStream.handshaked !== true && opts.allowSkippedHandshake === false) {
                     reject(new Error("No handshake given"));
                 }
             }, reject);
@@ -73,9 +82,11 @@ function BackupServer(opts) {
 
     function clientConnection(socket) {
         var objStream = new common.ObjectStream(socket);
-        handleCommand(objStream, false).then(function () {
-            socket.close();
-        });
+        promiseLoop(function () {
+            return objStream.closed === true;
+        }, function () {
+            return handleCommand(objStream);
+        }).then(socket.close);
     }
 
     function initOpts() {
