@@ -73,7 +73,7 @@ FILE_ADD: Add a file to be tracked by the database.
 {
 	"filePath": "client/file/path",
 	"fileUrl": "URL where the file to be uploaded can be found",
-	"port": [port having the HTTP server
+	"port": port having the HTTP server
 }
 Once this message has been received by the server, the server download the file from the given URL and add it to a database. Once it has completed, the server sends the response object
 {

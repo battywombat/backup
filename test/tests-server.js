@@ -1,3 +1,4 @@
+var fs = require('fs');
 var net = require('net');
 
 var chai = require('chai');
@@ -17,24 +18,16 @@ describe('BackupServer', function () {
                     testuser: 'fakekey'
                 }
             });
-            srv.listen().then(function () {
-                done();
-            }, function (err) {
-                done(err);
-            });
+            srv.listen().then(done, done);
         });
         afterEach(function () {
             srv.close();
         });
-        it('should use to connect to the server on the default port', function (done) {
-            var sock = net.connect({
-                port: common.SERVER_DEFAULT_PORT
-            }, function () {
-                done();
+        it('should connect to the server on the default port', function (done) {
+            var sock = net.connect(common.SERVER_DEFAULT_PORT, function (e) {
+                done(e);
             });
-            sock.on('error', function (err) {
-                done(err);
-            });
+            sock.on('error', done);
         });
         it('should send a handshake object', function (done) {
             var sock = net.connect({
@@ -46,7 +39,7 @@ describe('BackupServer', function () {
                 username: 'testuser',
                 secretkey: 'fakekey',
                 type: common.commands.HANDSHAKE
-            }).then(objStream.recieveObject()).then(function (obj) {
+            }).then(objStream.recieveObject).then(function (obj) {
                 chai.expect(obj).to.be.an('Object', "No object sent");
                 chai.expect(obj.username).to.be.a('string', "No username");
                 chai.expect(obj.secretkey).to.be.a('string', "No secret key");
@@ -64,18 +57,13 @@ describe('BackupServer', function () {
     describe("#initDB", function () {
         var srv;
         var db;
-        // beforeEach(function () {
-        // });
-
-        afterEach(function (done) {
-            srv.close().then(done);
-        });
+        var testDBPath = "./fake";
 
         function connectDB() {
             return new Promise(function (resolve, reject) {
-                srv = new backupserver.BackupServer({dbPath: './fake'});
+                srv = new backupserver.BackupServer({dbPath: testDBPath});
                 srv.listen(9002).then(function () {
-                    db = new sqlite.Database("./fake", function (err) {
+                    db = new sqlite.Database(testDBPath, function (err) {
                         if (err) {
                             reject(err);
                         }
@@ -84,6 +72,18 @@ describe('BackupServer', function () {
                 });
             });
         }
+
+        function deleteDB() {
+            return new Promise(function (resolve, reject) {
+                fs.unlink(testDBPath, function (err) {
+                    if (err) {
+                        reject(err);
+                    }
+                    resolve();
+                });
+            });
+        }
+
         function checkDB(db) {
             return new Promise(function (resolve, reject) {
                 db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='users'", undefined, function (err, row) {
@@ -97,9 +97,10 @@ describe('BackupServer', function () {
         }
 
         it("Should create the database if it has not already been initalized", function (done) {
-            srv = backupserver.BackupServer({dbPath: "./fake"});
+            srv = backupserver.BackupServer({dbPath: testDBPath});
             srv.listen().then(connectDB, done)
                 .then(checkDB, done)
+                .then(deleteDB, done)
                 .then(done, done);
         });
     });

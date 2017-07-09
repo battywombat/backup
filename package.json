@@ -9,7 +9,8 @@
   "author": "Paul Warner",
   "license": "ISC",
   "dependencies": {
-    "sqlite3": "^3.1.8"
+    "sqlite3": "^3.1.8",
+    "uuid": "^3.0.1"
   },
   "devDependencies": {
     "chai": "^3.5.0",

@@ -31,7 +31,8 @@ var defaultConfig = {
         },
         'username': 'serveruser',
         'secretkey': 'otherkey',
-        dbPath: './db.sqlite3'
+        dbPath: './db.sqlite3',
+        downloadPath: "./downloads"
     }
 };
 
@@ -97,10 +98,85 @@ var ObjectStream = (function () {
             dataBuffer = "",
             decoder = new StringDecoder('utf-8');
 
+        function canRead() {
+            var next = getNext();
+            if (next.length === 0) {
+                return true;
+            }
+            return dataBuffer.length >= next.length;
+        }
+
+        function readNext() {
+            var next = getNext(),
+                jsonString = undefined;
+            if (next.length === 0) {
+                next.length = parseInt(dataBuffer, 10);
+                dataBuffer = dataBuffer.substring(next.length.toString().length, dataBuffer.length);
+            }
+
+            if (dataBuffer.length >= next.length) {
+                jsonString = dataBuffer.substring(0, next.length);
+                try {
+                    next.obj = JSON.parse(jsonString);
+                } catch (e) {
+                    next.err = e;
+                }
+                next.finished = true;
+                dataBuffer = dataBuffer.substring(next.length, dataBuffer.length);
+            }
+
+        }
+
+
+        function onNewData(data) {
+            var next = getNext(),
+                jsonString = undefined;
+            dataBuffer += decoder.write(data);
+
+            while(canRead()) {
+                readNext();
+            }
+
+
+            if (next.finished && next.resolve !== undefined && next.reject !== undefined) {
+                if (next.err !== undefined) {
+                    next.reject(next.err);
+                } else {
+                    next.resolve(next.obj);
+                }
+                received.splice(0, 1);
+            }
+        }
+
+        function onError(err) {
+            var next = getNext();
+            next.err = err;
+            next.finished = true;
+        }
+
+        function connectEvents() {
+            socket.on('data', onNewData);
+            socket.on('error', onError);
+        }
+
         if (opts instanceof net.Socket) {
             socket = opts;
-        } else {
-            socket = new net.connect(opts);
+            connectEvents();
+        }
+
+        function connect() {
+            return new Promise(function (resolve, reject) {
+                if (socket !== undefined) {
+                    resolve();
+                }
+                socket = net.connect(opts, function (err) {
+                    if (err) {
+                        reject(err);
+                    }
+                    connectEvents();
+                    resolve();
+                });
+            });
         }
 
         function getNext() {
@@ -111,10 +187,11 @@ var ObjectStream = (function () {
             }
             while (i < received.length) {
                 if (received[i].finished !== true) {
-                    break;
+                    return received[i];
                 }
                 i += 1;
             }
+            received.push(Object.create(receivedProto));
             return received[i];
         }
 
@@ -131,42 +208,6 @@ var ObjectStream = (function () {
             received.push(p);
             return p;
         }
-
-        socket.on('data', function (data) {
-            var next = getNext(),
-                jsonString = undefined;
-            dataBuffer += decoder.write(data);
-
-            if (next.length === 0) {
-                next.length = parseInt(dataBuffer, 10);
-                dataBuffer = dataBuffer.substring(next.length.toString().length, dataBuffer.length);
-            }
-
-            if (next.length >= dataBuffer.length) {
-                jsonString = dataBuffer.substring(0, next.length);
-                try {
-                    next.obj = JSON.parse(jsonString);
-                } catch (e) {
-                    next.err = e;
-                }
-                next.finished = true;
-                dataBuffer = dataBuffer.substring(next.length, dataBuffer.length);
-            }
-            if (next.finished && next.resolve !== undefined && next.reject !== undefined) {
-                if (next.err !== undefined) {
-                    next.reject(next.err);
-                } else {
-                    next.resolve(next.obj);
-                }
-                received.splice(0, 1);
-            }
-        });
-
-        socket.on('error', function (err) {
-            var next = getNext();
-            next.err = err;
-            next.finished = true;
-        });
 
 
         return {
@@ -196,9 +237,12 @@ var ObjectStream = (function () {
              * @returns {Promise.<Void, Error>} A promise that will reject with an error if one occurs, else will resolve.
              */
             sendObject: function (obj) {
-                return new Promise(function (reject, resolve) {
+                return new Promise(function (resolve, reject) {
+                    if (obj === undefined) {
+                        reject(new Error("No object given as argument"));
+                        return;
+                    }
                     var jsonString = JSON.stringify(obj);
-
                     socket.write(jsonString.length.toString() + jsonString, function (err) {
                         if (err) {
                             reject(err);
@@ -216,7 +260,9 @@ var ObjectStream = (function () {
              */
             close: function () {
                 socket.destroy();
-            }
+            },
+
+            connect: connect
         };
     };
 }());
@@ -289,7 +335,10 @@ function UploadServer(opts, files) {
 
 var commands = {
     CLOSE: "CLOSE",
-    HANDSHAKE: "HANDSHAKE"
+    HANDSHAKE: "HANDSHAKE",
+    ADD_FILE: "ADD_FILE",
+    ACK: "ACK",
+    NACK: "NACK"
 };
 
 module.exports = {

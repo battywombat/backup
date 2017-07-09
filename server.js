@@ -1,6 +1,10 @@
 var net = require('net');
+var http = require('http');
+var fs = require('fs');
+var crypto = require('crypto');
 
 var sqlite = require('sqlite3');
+var uuid = require('uuid/v4');
 
 var common = require('./common.js');
 
@@ -31,38 +35,190 @@ CREATE TABLE stored_files (
 
 function promiseLoop(condition, promise) {
     'use-strict';
-    return new Promise(function (resolve, reject) {
-        if (condition() !== true) {
-            resolve();
-        }
-        return promise().then(promiseLoop(condition, promise), reject);
-    });
+    var topresolve, topreject;
+    var f = function () {
+        return new Promise(function (resolve, reject) {
+            if (topresolve === undefined) {
+                topresolve = resolve;
+            }
+            if (topreject === undefined) {
+                topreject = reject;
+            }
+            if (condition() !== true) {
+                topresolve();
+                return;
+            }
+            return promise().then(f, topreject);
+        });
+    };
+    return f();
 }
 
-function BackupServer(opts) {
+function ClientConnection(objStream, opts) {
     'use-strict';
-    var server;
     var db;
-    var initalized;
     var self = {};
 
-    function serverDoHandshake(objStream, handshakeObj) {
-        var username = handshakeObj.username,
-            secretkey = handshakeObj.secretkey;
-
+    function connectDB() {
         return new Promise(function (resolve, reject) {
-            if (!opts.users.hasOwnProperty(username) || opts.users[username] !== secretkey) {
-                reject(new Error("Invalid secret key"));
-            }
+            db = new sqlite.Database(opts.dbPath, function (err) {
+                if (err) {
+                    reject(err);
+                } 
+                resolve();
+            });
+        });
+    }
+
+    function sendNACK(err) {
+        return new Promise(function (resolve) {
+            objStream.sendObject({
+                type: common.commands.NACK,
+                msg: err.toString()
+            }).then(resolve);
+        });
+    }
+
+    function sendACK() {
+        return new Promise(function (resolve) {
+            objStream.sendObject({
+                type: common.commands.ACK
+            }).then(resolve);
+        });
+    }
+
+    function serverCheckPassword(handshake) {
+        return new Promise(function (resolve, reject) {
+            db.get("SELECT password FROM users WHERE hostname = ?", [handshake.username], function (err, row) {
+                if (err) {
+                    reject(err);
+                }
+                if (row === undefined) {
+                    reject(new Error("No username " + handshake.username));
+                    return;
+                }
+                if (row.password !== handshake.secretkey) {
+                    reject(new Error("Incorrect secret key"));
+                }
+                resolve();
+            });
+        });
+    }
+
+    function serverSendHandshake() {
+        return new Promise(function (resolve, reject) {
             objStream.sendObject({
                 username: opts.username,
                 secretkey: opts.secretkey
             }).then(resolve, reject);
-
         });
     }
 
-    function handleCommand(objStream) {
+    function serverDoHandshake(handshake) {
+        return new Promise(function (resolve, reject) {
+            serverCheckPassword(handshake)
+                .then(serverSendHandshake, reject)
+                .then(resolve, reject);
+        });
+    }
+
+    function testIfFileInDatabase(fileInfo) {
+        return new Promise(function (resolve, reject) {
+            db.get('SELECT * FROM tracked_file WHERE client_path = ? AND user_id = ?', [fileInfo.filePath, fileInfo.userId], function (err, row) {
+                if (err) {
+                    reject(err);
+                }
+                if (row !== undefined) {
+                    reject(new Error("That file is already tracked"));
+                }
+                resolve(fileInfo);
+            })
+        });
+    }
+
+    function openFile(fileInfo) {
+        return new Promise(function (resolve, reject) {
+            fileInfo.serverPath = uuid();
+            fs.open(fileInfo.serverPath, "w", function (err, fd) {
+                if (err) {
+                    reject(err);
+                }
+                fileInfo.fd = fd;
+                resolve(fileInfo);
+            });
+        });
+    }
+
+    function downloadFile(fileInfo) {
+        return new Promise(function (resolve, reject) {
+            http.get({}, function (res) {
+                if (res.statusCode !== 200) {
+                    reject(new Error("Could not get file, error code"+ res.statusCode.toString()));
+                }
+                var hash = crypto.createHash("sha256");
+                res.on('error', function (err) {
+                    reject(err);
+                });
+                res.on('data', function (chunk) {
+                    hash.update(chunk);
+                    fs.write(fileInfo.fd, chunk, function (err) {
+                        if (err) {
+                            reject(err);
+                        }
+                    });
+                });
+                res.on('end', function () {
+                    fs.close(fileInfo.fd, function (err) {
+                        if (err) {
+                            reject(err);
+                        }
+                        fileInfo.hash = hash.digest("hex");
+                        resolve(fileInfo);
+                    });
+                });
+            });
+        });
+    }
+
+    function addTrackedFileToDatabase(fileInfo) {
+        return new Promise(function (resolve, reject) {
+            db.run("INSERT INTO tracked_files(user_id, client_path) VALUES(?, ?)", [fileInfo.userId, fileInfo.filePath], function (err) {
+                if (err) {
+                    reject(err);
+                }
+                fileInfo.trackedId = this.lastID;
+                resolve(fileInfo);
+            });
+        });
+
+    }
+
+    function addStoredFileToDatabase(fileInfo) {
+        return new Promise(function (resolve, reject) {
+            db.run("INSERT INTO stored_files(file_id, server_path, date_added, hash) VALUES(?,?,?,?)", 
+                    [fileInfo.trackedId, fileInfo.serverPath, Date.now(), fileInfo.hash], function (err) {
+                if (err) {
+                    db.exec("DELETE FROM tracked_files WHERE id= ?", [fileInfo.trackedId], function () {
+                        reject(err);
+                    });
+                }
+                resolve();
+            });
+        });
+    }
+
+    function addFile(fileInfo) {
+        return new Promise(function (resolve, reject) {
+            testIfFileInDatabase(fileInfo)
+                .then(openFile, reject)
+                .then(downloadFile, reject)
+                .then(addTrackedFileToDatabase, reject)
+                .then(addStoredFileToDatabase, reject)
+                .then(resolve, reject);
+        });
+    }
+
+    function handleCommand() {
         return new Promise(function (resolve, reject) {
             objStream.recieveObject().then(function (obj) {
                 if (obj.type === common.commands.HANDSHAKE) {
@@ -75,18 +231,49 @@ function BackupServer(opts) {
                     resolve();
                 } else if (objStream.handshaked !== true && opts.allowSkippedHandshake === false) {
                     reject(new Error("No handshake given"));
+                } else if (obj.type === common.commands.ADD_FILE) {
+                    addFile(obj).then(resolve, reject);
                 }
             }, reject);
         });
     }
 
+    self.start = function () {
+        return new Promise(function (resolve) {
+            connectDB()
+                .then(function () {
+                    return promiseLoop(function () {
+                        return objStream.closed !== true;
+                    }, function () {
+                        return handleCommand();
+                    }, resolve).then(resolve, resolve);
+                });
+        });
+    };
+
+    return self;
+}
+
+function BackupServer(opts) {
+    'use-strict';
+    var server;
+    var db;
+    var initalized;
+    var self = {};
+    var clients = [];
+
+    function finishClient(client, socket) {
+        clients.splice(clients.indexOf(client), 1);
+        socket.end();
+    }
+
     function clientConnection(socket) {
         var objStream = new common.ObjectStream(socket);
-        promiseLoop(function () {
-            return objStream.closed === true;
-        }, function () {
-            return handleCommand(objStream);
-        }).then(socket.close);
+        var newClient = new ClientConnection(objStream, opts);
+        clients.push(newClient);
+        newClient.start().then(function () {
+            finishClient(newClient, socket);
+        });
     }
 
     function initOpts() {
@@ -106,6 +293,31 @@ function BackupServer(opts) {
     function initServer() {
         server = net.createServer();
         server.on('connection', clientConnection);
+    }
+
+    function addUserOpts(db) {
+        return new Promise(function (resolve, reject) {
+            var username = Object.keys(opts.users)[0];
+            var password = opts.users[username];
+            db.run('INSERT INTO users(hostname, password) VALUES(?, ?)', [username, password], function (err) {
+                if (err) {
+                    reject(err);
+                }
+                delete opts.users[username];
+                resolve();
+            });
+        });
+    }
+
+    function addOptsUsers(db) {
+
+        return new Promise(function (resolve, reject) {
+            promiseLoop(function () {
+                return Object.keys(opts.users).length > 0;
+            }, function () {
+                return addUserOpts(db);
+            }).then(resolve, reject);
+        });
     }
 
     function initDB() {
@@ -158,6 +370,9 @@ function BackupServer(opts) {
                 createSchema,
                 reject
             ).then(
+                addOptsUsers,
+                reject
+            ).then(
                 resolve,
                 reject
             );
@@ -183,20 +398,16 @@ function BackupServer(opts) {
         port = port || common.SERVER_DEFAULT_PORT;
         return new Promise(function (resolve, reject) {
             init().then(function () {
-                server.listen(port);
+                server.listen(port, "localhost", 512);
                 resolve();
-            }, function (err) {
-                reject(err);
-            });
+            }, reject);
         });
     };
 
     self.close = function () {
         return new Promise(function (resolve) {
             server.close();
-            db.close(function () {
-                resolve();
-            });
+            db.close(resolve);
         });
     };
 

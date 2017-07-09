@@ -27,30 +27,40 @@ function makeObjectStream() {
             port: port - 1,
             host: 'localhost'
         });
+        clientStream.connect();
     });
 }
 
 describe('ObjectStream', function () {
     'use-strict';
-    var serverOS,
-        osServer = net.createServer(function (c) {
-            serverOS = new common.ObjectStream(c);
-            serverOS.socket = c;
+    var server,
+        serverEnd,
+        clientEnd;
+
+    beforeEach(function (done) {
+        server = net.createServer(function (c) {
+            serverEnd = new common.ObjectStream(c);
+            serverEnd.socket = c;
+            done();
         });
+        server.listen(9001, 'localhost', function () {
+            clientEnd = new common.ObjectStream({
+                port: 9001,
+                host: 'localhost'
+            });
+            clientEnd.connect();
+        });
+    });
 
-    osServer.listen(9001, 'localhost');
-
-    after(function () {
-        osServer.close();
+    afterEach(function (done) {
+        serverEnd.close();
+        clientEnd.close();
+        server.close(done);
     });
 
     describe("#sendObject", function () {
         it('should reject if no object is given as an argument', function (done) {
-            var clientOS = new common.ObjectStream({
-                port: 9001,
-                host: 'localhost'
-            });
-            clientOS.sendObject().then(function () {
+            clientEnd.sendObject().then(function () {
                 done(new Error("Should not have sent an object"));
             }, function (err) {
                 chai.expect(err).to.not.equal(undefined);
@@ -59,120 +69,86 @@ describe('ObjectStream', function () {
         });
 
         it('should resolve with no arguments if the object is successfully passed', function (done) {
-            var clientOS = new common.ObjectStream({
-                port: 9001,
-                host: 'localhost'
-            });
-            clientOS.sendObject({}).then(function () {
-                done();
-            }, function (err) {
-                done(err);
-            });
+            clientEnd.sendObject({})
+                .then(done, done);
         });
 
         it("Should send some data thorugh its socket", function (done) {
-            makeObjectStream().then(function (obj) {
-                var client = obj.client,
-                    server = obj.server;
-                server.socket.on('data', function () {
-                    done();
-                });
-                client.sendObject({});
-            }, function (err) {
-                done(err);
+            serverEnd.socket.on('data', function () {
+                done();
             });
+            clientEnd.sendObject({});
         });
     });
 
     describe("#recieveObject", function () {
         it('Will correctly recieve a single object', function (done) {
-            makeObjectStream().then(function (obj) {
-                var client = obj.client,
-                    server = obj.server;
-                server.sendObject({});
-                client.recieveObject().then(function (o) {
-                    chai.expect(o).to.be.a('object');
-                    done();
-                }, function (err) {
-                    done(err);
-                });
-            }, function (err) {
-                done(err);
-            });
+            serverEnd.sendObject({});
+            clientEnd.recieveObject().then(function (o) {
+                chai.expect(o).to.be.a('object');
+                done();
+            }, done);
         });
 
         it("Will raise an error if the recieved object is malformed", function (done) {
-            makeObjectStream().then(function (socks) {
-                var client = socks.client,
-                    server = socks.server;
-                server.socket.write('2{a');
-                client.recieveObject().then(function () {
-                    done(new Error("Somehow parsed broken object"));
-                }, function (err) {
-                    chai.expect(err).to.not.equal(undefined);
-                    done();
-                });
+            serverEnd.socket.write('2{a');
+            clientEnd.recieveObject().then(function () {
+                done(new Error("Somehow parsed broken object"));
             }, function (err) {
-                done(err);
+                chai.expect(err).to.not.equal(undefined);
+                done();
             });
         });
 
         it("Will recieve multiple objects in a row, in the correct order", function (done) {
             var obj1 = {
-                prop: 1
-            },
+                    prop: 1
+                },
                 obj2 = {
                     prop: 2
-                },
-                clientOS = new common.ObjectStream({
-                    port: 9001,
-                    host: 'localhost'
-                });
-            serverOS.sendObject(obj1).then(function () {
-                return serverOS.sendObject(obj2);
-            }, function (err) {
-                done(err);
-            });
-            clientOS.recieveObject().then(function (o) {
-                chai.expect(o.prop).to.equal(obj1.prop);
-            }, function (err) {
-                done(err);
-            });
-            clientOS.recieveObject().then(function (o) {
-                chai.expect(o.prop2).to.equal(obj2.prop);
-                done();
-            }, function (err) {
-                done(err);
-            });
+                };
+            function sendObject1() {
+                return serverEnd.sendObject(obj1);
+            }
+            function sendObject2() {
+                return serverEnd.sendObject(obj2);
+            }
+            sendObject1()
+                .then(sendObject2)
+                .then(clientEnd.recieveObject)
+                .then(function (o) {
+                    chai.expect(o.prop).to.equal(obj1.prop);
+                }, done)
+                .then(clientEnd.recieveObject, done)
+                .then(function (o) {
+                    chai.expect(o.prop).to.equal(obj2.prop);
+                    done();                   
+                }, done);
         });
 
         it('Should reject incorrect objects in the recieved order', function (done) {
             var obj1 = {
-                prop: 1
-            },
-                str = "3{ab",
-                clientOS = new common.ObjectStream({
-                    port: 9001,
-                    host: 'localhost'
+                    prop: 1
+                },
+                str = "3{ab";
+            function sendObject1() {
+                return serverEnd.sendObject(obj1);
+            }
+            sendObject1()
+                .then(function () {
+                    serverEnd.socket.write(str);
+                }, done)
+                .then(clientEnd.recieveObject, done)
+                .then(function (o) {
+                    chai.expect(o.prop).to.equal(obj1.prop);
+                    return clientEnd.recieveObject();
+                }, done)
+                .then(function () {
+                    done(new Error("Last recieved object should be broken"));                    
+                }, function (e) {
+                    chai.expect(e).to.not.equal(undefined);
+                    done();
                 });
-            serverOS.sendObject(obj1).then(function () {
-                serverOS.socket.write(str);
-            }, function (err) {
-                done(err);
-            });
-
-            clientOS.recieveObject().then(function (o) {
-                chai.expect(o.prop).to.equal(obj1.prop);
-            }, function (err) {
-                done(err);
-            });
-
-            clientOS.recieveObject().then(function () {
-                done(new Error("Last recieved object should be broken"));
-            }, function (e) {
-                chai.expect(e).to.equal(undefined);
-                done();
-            });
         });
 
         it('should correctly parse object that span more than one chunk', function (done) {
@@ -182,27 +158,20 @@ describe('ObjectStream', function () {
                 final = begin,
                 i = 0,
                 max = 512;
-            makeObjectStream().then(function (streams) {
-                var client = streams.client,
-                    server = streams.server;
-                while (i < max) {
-                    begin += middle;
-                    i += 1;
-                }
-                try {
-                    final = JSON.parse(begin + end);
-                } catch (e) {
-                    done(e);
-                }
-                server.sendObject(final).then(client.recieveObject()).then(function (obj) {
-                    chai.expect(obj).to.be.a('object');
-                    done();
-                }, function (err) {
-                    done(err);
-                });
-            }, function (err) {
-                done(err);
-            });
+            while (i < max) {
+                begin += middle;
+                i += 1;
+            }
+            try {
+                final = JSON.parse(begin + end);
+            } catch (e) {
+                done(e);
+            }
+            serverEnd.sendObject(final).then(clientEnd.recieveObject).then(function (obj) {
+                chai.expect(obj).to.be.a('object');
+                done();
+            }, done);
+
         });
     });
 });
