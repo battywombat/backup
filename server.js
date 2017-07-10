@@ -64,7 +64,7 @@ function ClientConnection(objStream, opts) {
             db = new sqlite.Database(opts.dbPath, function (err) {
                 if (err) {
                     reject(err);
-                } 
+                }
                 resolve();
             });
         });
@@ -244,9 +244,7 @@ function ClientConnection(objStream, opts) {
                 .then(function () {
                     return promiseLoop(function () {
                         return objStream.closed !== true;
-                    }, function () {
-                        return handleCommand();
-                    }, resolve).then(resolve, resolve);
+                    }, handleCommand, resolve).then(resolve, resolve);
                 });
         });
     };
@@ -284,6 +282,7 @@ function BackupServer(opts) {
                         readOpts.server[key] = opts[key];
                     });
                 }
+                readOpts.db = opts.db;
                 opts = readOpts.server;
                 resolve();
             }, reject);
@@ -323,6 +322,11 @@ function BackupServer(opts) {
     function initDB() {
         function createDatabase(dbPath) {
             return new Promise(function (resolve, reject) {
+                if (opts.db !== undefined) {
+                    db = opts.db;
+                    resolve(db);
+                    return;
+                }
                 db = new sqlite.Database(dbPath, function (err) {
                     if (err) {
                         reject(err);
@@ -336,6 +340,7 @@ function BackupServer(opts) {
         function checkForSchema(db) {
             return new Promise(function (resolve, reject) {
                 db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='users'", undefined, function (err, row) {
+                    console.log('checked....');
                     if (err) {
                         reject(err);
                     }
@@ -348,6 +353,7 @@ function BackupServer(opts) {
             var newDB = args[0],
                 hasSchema = args[1];
             return new Promise(function (resolve, reject) {
+                console.log('create schema....');
                 if (hasSchema) {
                     resolve(newDB);
                 }

@@ -61,30 +61,40 @@ describe('BackupServer', function () {
 
         function connectDB() {
             return new Promise(function (resolve, reject) {
-                srv = new backupserver.BackupServer({dbPath: testDBPath});
-                srv.listen(9002).then(function () {
-                    db = new sqlite.Database(testDBPath, function (err) {
-                        if (err) {
-                            reject(err);
-                        }
-                        resolve(db);
-                    });
+                db = new sqlite.Database(testDBPath, function (err) {
+                    if (err) {
+                        reject(err);
+                    }
+                    resolve(db);
                 });
             });
         }
 
         function deleteDB() {
             return new Promise(function (resolve, reject) {
-                fs.unlink(testDBPath, function (err) {
-                    if (err) {
-                        reject(err);
-                    }
-                    resolve();
+                db.close(function () {
+                    fs.unlink(testDBPath, function (err) {
+                        if (err) {
+                            reject(err);
+                        }
+                        resolve();
+                    });
                 });
             });
         }
 
-        function checkDB(db) {
+        beforeEach(function (done) {
+            connectDB().then(function () {
+                srv = new backupserver.BackupServer({db: db});
+                srv.listen(9002).then(done);
+            }, done);
+        });
+
+        afterEach(function (done) {
+            deleteDB().then(done);
+        });
+
+        function checkDB() {
             return new Promise(function (resolve, reject) {
                 db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='users'", undefined, function (err, row) {
                     if (err || row === undefined) {
@@ -96,12 +106,8 @@ describe('BackupServer', function () {
             });
         }
 
-        it("Should create the database if it has not already been initalized", function (done) {
-            srv = backupserver.BackupServer({dbPath: testDBPath});
-            srv.listen().then(connectDB, done)
-                .then(checkDB, done)
-                .then(deleteDB, done)
-                .then(done, done);
+        it.only("Should create the database", function (done) {
+            checkDB().then(done, done);
         });
     });
 });
