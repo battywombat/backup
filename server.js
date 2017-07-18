@@ -54,9 +54,8 @@ function promiseLoop(condition, promise) {
     return f();
 }
 
-function ClientConnection(objStream, opts) {
+function ClientConnection(objStream, opts, db) {
     'use-strict';
-    var db;
     var self = {};
 
     function connectDB() {
@@ -95,7 +94,6 @@ function ClientConnection(objStream, opts) {
                 }
                 if (row === undefined) {
                     reject(new Error("No username " + handshake.username));
-                    return;
                 }
                 if (row.password !== handshake.secretkey) {
                     reject(new Error("Incorrect secret key"));
@@ -153,12 +151,10 @@ function ClientConnection(objStream, opts) {
         return new Promise(function (resolve, reject) {
             http.get({}, function (res) {
                 if (res.statusCode !== 200) {
-                    reject(new Error("Could not get file, error code"+ res.statusCode.toString()));
+                    reject(new Error("Could not get file, error code" + res.statusCode.toString()));
                 }
                 var hash = crypto.createHash("sha256");
-                res.on('error', function (err) {
-                    reject(err);
-                });
+                res.on('error', reject);
                 res.on('data', function (chunk) {
                     hash.update(chunk);
                     fs.write(fileInfo.fd, chunk, function (err) {
@@ -190,7 +186,6 @@ function ClientConnection(objStream, opts) {
                 resolve(fileInfo);
             });
         });
-
     }
 
     function addStoredFileToDatabase(fileInfo) {
@@ -228,7 +223,7 @@ function ClientConnection(objStream, opts) {
                     }, reject);
                 } else if (obj.type === common.commands.CLOSE) {
                     objStream.closed = true;
-                    resolve();
+                    db.close(resolve);
                 } else if (objStream.handshaked !== true && opts.allowSkippedHandshake === false) {
                     reject(new Error("No handshake given"));
                 } else if (obj.type === common.commands.ADD_FILE) {
@@ -239,14 +234,14 @@ function ClientConnection(objStream, opts) {
     }
 
     self.start = function () {
-        return new Promise(function (resolve) {
-            connectDB()
-                .then(function () {
-                    return promiseLoop(function () {
-                        return objStream.closed !== true;
-                    }, handleCommand, resolve).then(resolve, resolve);
-                });
-        });
+        db = opts.db;
+        return promiseLoop(function () {
+            return objStream.closed !== true;
+        }, handleCommand);
+    };
+
+    self.forceClose = function () {
+        objStream.closed = true;
     };
 
     return self;
@@ -267,7 +262,7 @@ function BackupServer(opts) {
 
     function clientConnection(socket) {
         var objStream = new common.ObjectStream(socket);
-        var newClient = new ClientConnection(objStream, opts);
+        var newClient = new ClientConnection(objStream, opts, db);
         clients.push(newClient);
         newClient.start().then(function () {
             finishClient(newClient, socket);
@@ -311,6 +306,9 @@ function BackupServer(opts) {
     function addOptsUsers(db) {
 
         return new Promise(function (resolve, reject) {
+            if (opts.users === undefined) {
+                resolve();
+            }
             promiseLoop(function () {
                 return Object.keys(opts.users).length > 0;
             }, function () {
@@ -324,6 +322,7 @@ function BackupServer(opts) {
             return new Promise(function (resolve, reject) {
                 if (opts.db !== undefined) {
                     db = opts.db;
+                    opts.dbPath = opts.db.filename;
                     resolve(db);
                     return;
                 }
@@ -340,7 +339,6 @@ function BackupServer(opts) {
         function checkForSchema(db) {
             return new Promise(function (resolve, reject) {
                 db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='users'", undefined, function (err, row) {
-                    console.log('checked....');
                     if (err) {
                         reject(err);
                     }
@@ -353,7 +351,6 @@ function BackupServer(opts) {
             var newDB = args[0],
                 hasSchema = args[1];
             return new Promise(function (resolve, reject) {
-                console.log('create schema....');
                 if (hasSchema) {
                     resolve(newDB);
                 }
@@ -365,7 +362,6 @@ function BackupServer(opts) {
                     resolve(newDB);
                 });
             });
-
         }
 
         return new Promise(function (resolve, reject) {

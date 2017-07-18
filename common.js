@@ -26,9 +26,6 @@ var defaultConfig = {
         'key': "secretkeydontsteal"
     },
     'server': {
-        'users': {
-            'testuser': 'secretkeydontsteal'
-        },
         'username': 'serveruser',
         'secretkey': 'otherkey',
         dbPath: './db.sqlite3',
