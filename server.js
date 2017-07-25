@@ -36,7 +36,8 @@ CREATE TABLE stored_files (
 function promiseLoop(condition, promise) {
     'use-strict';
     var topresolve, topreject;
-    var f = function () {
+    var f;
+    f = function () {
         return new Promise(function (resolve, reject) {
             if (topresolve === undefined) {
                 topresolve = resolve;
@@ -57,17 +58,6 @@ function promiseLoop(condition, promise) {
 function ClientConnection(objStream, opts, db) {
     'use-strict';
     var self = {};
-
-    function connectDB() {
-        return new Promise(function (resolve, reject) {
-            db = new sqlite.Database(opts.dbPath, function (err) {
-                if (err) {
-                    reject(err);
-                }
-                resolve();
-            });
-        });
-    }
 
     function sendNACK(err) {
         return new Promise(function (resolve) {
@@ -130,7 +120,7 @@ function ClientConnection(objStream, opts, db) {
                     reject(new Error("That file is already tracked"));
                 }
                 resolve(fileInfo);
-            })
+            });
         });
     }
 
@@ -190,7 +180,7 @@ function ClientConnection(objStream, opts, db) {
 
     function addStoredFileToDatabase(fileInfo) {
         return new Promise(function (resolve, reject) {
-            db.run("INSERT INTO stored_files(file_id, server_path, date_added, hash) VALUES(?,?,?,?)", 
+            db.run("INSERT INTO stored_files(file_id, server_path, date_added, hash) VALUES(?,?,?,?)",
                     [fileInfo.trackedId, fileInfo.serverPath, Date.now(), fileInfo.hash], function (err) {
                 if (err) {
                     db.exec("DELETE FROM tracked_files WHERE id= ?", [fileInfo.trackedId], function () {

@@ -95,6 +95,22 @@ var ObjectStream = (function () {
             dataBuffer = "",
             decoder = new StringDecoder('utf-8');
 
+        function getNext() {
+            var i = 0;
+            if (received.length === 0) {
+                received.push(Object.create(receivedProto));
+                return received[0];
+            }
+            while (i < received.length) {
+                if (received[i].finished !== true) {
+                    return received[i];
+                }
+                i += 1;
+            }
+            received.push(Object.create(receivedProto));
+            return received[i];
+        }
+
         function canRead() {
             var next = getNext();
             if (next.length === 0) {
@@ -126,11 +142,11 @@ var ObjectStream = (function () {
 
 
         function onNewData(data) {
-            var next = getNext(),
-                jsonString = undefined;
+            var next = getNext();
+
             dataBuffer += decoder.write(data);
 
-            while(canRead()) {
+            while (canRead()) {
                 readNext();
             }
 
@@ -174,22 +190,6 @@ var ObjectStream = (function () {
                     resolve();
                 });
             });
-        }
-
-        function getNext() {
-            var i = 0;
-            if (received.length === 0) {
-                received.push(Object.create(receivedProto));
-                return received[0];
-            }
-            while (i < received.length) {
-                if (received[i].finished !== true) {
-                    return received[i];
-                }
-                i += 1;
-            }
-            received.push(Object.create(receivedProto));
-            return received[i];
         }
 
         function getWaiting() {

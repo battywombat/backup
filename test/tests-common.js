@@ -5,31 +5,7 @@ var fs = require('fs');
 var chai = require('chai');
 var common = require('../common');
 
-var port = 9002;
 
-function makeObjectStream() {
-    'use-strict';
-    return new Promise(function (resolve) {
-        var serverStream,
-            clientStream,
-            osServer = net.createServer(function (c) {
-                serverStream = new common.ObjectStream(c);
-                serverStream.socket = c;
-                osServer.close();
-                resolve({
-                    server: serverStream,
-                    client: clientStream
-                });
-            });
-        osServer.listen(port, 'localhost');
-        port += 1;
-        clientStream = new common.ObjectStream({
-            port: port - 1,
-            host: 'localhost'
-        });
-        clientStream.connect();
-    });
-}
 
 describe('ObjectStream', function () {
     'use-strict';
@@ -122,7 +98,7 @@ describe('ObjectStream', function () {
                 .then(clientEnd.recieveObject, done)
                 .then(function (o) {
                     chai.expect(o.prop).to.equal(obj2.prop);
-                    done();                   
+                    done();
                 }, done);
         });
 
@@ -144,7 +120,7 @@ describe('ObjectStream', function () {
                     return clientEnd.recieveObject();
                 }, done)
                 .then(function () {
-                    done(new Error("Last recieved object should be broken"));                    
+                    done(new Error("Last recieved object should be broken"));
                 }, function (e) {
                     chai.expect(e).to.not.equal(undefined);
                     done();

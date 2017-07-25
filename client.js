@@ -2,7 +2,6 @@ var net = require('net');
 
 var common = require('./common.js');
 
-
 function BackupClient(configpath) {
     'use-strict';
     var socket;
